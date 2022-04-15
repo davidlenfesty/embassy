@@ -500,6 +500,7 @@ impl<'d, D: Driver<'d>> UsbDevice<'d, D> {
                         1 => self.config.manufacturer,
                         2 => self.config.product,
                         3 => self.config.serial_number,
+                        4 => Some("020304050607"),
                         _ => {
                             let _index = StringIndex::new(index);
                             let _lang_id = req.index;
