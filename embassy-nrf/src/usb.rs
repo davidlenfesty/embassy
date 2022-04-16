@@ -338,16 +338,20 @@ impl<'d, T: Instance> driver::Bus for Bus<'d, T> {
     }
 
     #[inline]
-    fn set_device_address(&mut self, _addr: u8) {
+    fn set_address(&mut self, _addr: u8) {
         // Nothing to do, the peripheral handles this.
     }
 
-    fn set_stalled(&mut self, ep_addr: EndpointAddress, stalled: bool) {
+    fn endpoint_set_stalled(&mut self, ep_addr: EndpointAddress, stalled: bool) {
         Driver::<T>::set_stalled(ep_addr, stalled)
     }
 
-    fn is_stalled(&mut self, ep_addr: EndpointAddress) -> bool {
+    fn endpoint_is_stalled(&mut self, ep_addr: EndpointAddress) -> bool {
         Driver::<T>::is_stalled(ep_addr)
+    }
+
+    fn endpoint_set_enabled(&mut self, ep_addr: EndpointAddress, enabled: bool) {
+        todo!();
     }
 
     #[inline]
