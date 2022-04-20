@@ -9,9 +9,14 @@ use defmt_rtt as _; // global logger
 use panic_probe as _;
 
 use embassy_lora::{stm32wl::*, LoraTimer};
-use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::{Input, Level, Output, Pin, Pull, Speed};
-use embassy_stm32::{dma::NoDma, interrupt, pac, rng::Rng, subghz::*, Peripherals};
+use embassy_stm32::{
+    dma::NoDma,
+    gpio::{Level, Output, Pin, Speed},
+    interrupt, pac,
+    rng::Rng,
+    subghz::*,
+    Peripherals,
+};
 use lorawan_device::async_device::{region, Device, JoinMode};
 use lorawan_encoding::default_crypto::DefaultFactory as Crypto;
 
@@ -46,30 +51,16 @@ async fn main(_spawner: embassy::executor::Spawner, p: Peripherals) {
     // TODO: Adjust the EUI and Keys according to your network credentials
     device
         .join(&JoinMode::OTAA {
-            deveui: [0x5E, 0xF9, 0x04, 0xD0, 0x7E, 0xD5, 0xB3, 0x70],
+            deveui: [0, 0, 0, 0, 0, 0, 0, 0],
             appeui: [0, 0, 0, 0, 0, 0, 0, 0],
-            appkey: [
-                0x2B, 0xE8, 0x12, 0x3A, 0xE6, 0x2C, 0xA1, 0xB2, 0x30, 0x3F, 0x5A, 0xD2, 0x3B, 0x88,
-                0x7B, 0x8A,
-            ],
+            appkey: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         })
         .await
         .ok()
         .unwrap();
     defmt::info!("LoRaWAN network joined");
 
-    let button = Input::new(p.PA0, Pull::Up);
-    let mut user_button = ExtiInput::new(button, p.EXTI0);
-
-    let mut rx = [0; 256];
-    loop {
-        user_button.wait_for_rising_edge().await;
-        defmt::info!("Sending 'PING'");
-        let len = device
-            .send_recv(b"PING", &mut rx[..], 1, true)
-            .await
-            .ok()
-            .unwrap();
-        defmt::info!("Message sent! Received {} bytes", len);
-    }
+    defmt::info!("Sending 'PING'");
+    device.send(b"PING", 1, false).await.ok().unwrap();
+    defmt::info!("Message sent!");
 }

@@ -1,3 +1,4 @@
+use crate::pac;
 use crate::peripherals::FLASH;
 use core::marker::PhantomData;
 use embassy::util::Unborrow;
@@ -15,6 +16,11 @@ pub struct Flash<'d> {
 impl<'d> Flash<'d> {
     pub fn new(p: impl Unborrow<Target = FLASH>) -> Self {
         unborrow!(p);
+        let f = pac::FLASH;
+        unsafe {
+            f.keyr().write(|w| w.set_keyr(0x4567_0123));
+            f.keyr().write(|w| w.set_keyr(0xCDEF_89AB));
+        }
         Self {
             _inner: p,
             _phantom: PhantomData,
