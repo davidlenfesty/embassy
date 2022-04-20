@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+use core::ptr::read_volatile;
 use defmt::{info, unwrap};
 use embassy::executor::Spawner;
 use embassy::time::{Duration, Timer};
@@ -12,15 +13,24 @@ use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use defmt_rtt as _; // global logger
 use panic_probe as _;
 
-#[embassy::main]
+fn config() -> embassy_stm32::Config {
+    let mut config = embassy_stm32::Config::default();
+    config.rcc.enable_flash = true;
+    config
+}
+
+#[embassy::main(config = "config()")]
 async fn main(_spawner: Spawner, p: Peripherals) {
-    info!("Hello NVMC!");
+    info!("Hello Flash!");
 
     // probe-run breaks without this, I'm not sure why.
     Timer::after(Duration::from_secs(1)).await;
 
+    const ADDR: u32 = 0x083F000;
+
+    //defmt::assert_eq!(unsafe { read_volatile(ADDR as *const u64) }, u64::MAX);
+
     let mut f = Flash::new(p.FLASH);
-    const ADDR: u32 = 0x80000;
 
     info!("Reading...");
     let mut buf = [0u8; 4];
@@ -28,7 +38,7 @@ async fn main(_spawner: Spawner, p: Peripherals) {
     info!("Read: {=[u8]:x}", buf);
 
     info!("Erasing...");
-    unwrap!(f.erase(ADDR, ADDR + 4096));
+    unwrap!(f.erase(ADDR, ADDR + 2048));
 
     info!("Reading...");
     let mut buf = [0u8; 4];

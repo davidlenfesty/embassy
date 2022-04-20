@@ -1,12 +1,20 @@
 use crate::pac;
 use crate::peripherals::FLASH;
+use core::convert::TryInto;
 use core::marker::PhantomData;
+use core::ptr::{read_volatile, write_volatile};
 use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
 
 use embedded_storage::nor_flash::{
     ErrorType, MultiwriteNorFlash, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
 };
+
+const FLASH_SIZE: usize = 0x3FFFF;
+const FLASH_BASE: usize = 0x800000;
+const FLASH_START: usize = FLASH_BASE;
+const FLASH_END: usize = FLASH_START + FLASH_SIZE;
+const PAGE_SIZE: usize = 2048;
 
 pub struct Flash<'d> {
     _inner: FLASH,
@@ -26,12 +34,178 @@ impl<'d> Flash<'d> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn blocking_read(&mut self, mut offset: u32, bytes: &mut [u8]) -> Result<(), Error> {
+        if offset as usize >= FLASH_END || offset as usize + bytes.len() > FLASH_END {
+            return Err(Error::Size);
+        }
+
+        info!("Reading {} bytes from 0x{:x}", bytes.len(), offset);
+
+        let len = bytes.len();
+        let end = offset + bytes.len() as u32;
+        let mut remaining = bytes.len();
+        while offset < end {
+            let data = unsafe { read_volatile(offset as *const u64) };
+            let to_copy = core::cmp::min(8, remaining);
+
+            bytes[(len - remaining)..(len - remaining) + to_copy]
+                .copy_from_slice(&data.to_be_bytes()[..to_copy]);
+
+            remaining -= to_copy;
+            offset += to_copy as u32;
+        }
+        Ok(())
+    }
+
+    pub fn blocking_write(&mut self, offset: u32, buf: &[u8]) -> Result<(), Error> {
+        if offset as usize + buf.len() > FLASH_END {
+            return Err(Error::Size);
+        }
+        if offset as usize % 4 != 0 || buf.len() as usize % 4 != 0 {
+            return Err(Error::Unaligned);
+        }
+
+        self.clear_all_err();
+
+        let f = pac::FLASH;
+        unsafe {
+            f.cr().write(|w| w.set_pg(true));
+        }
+
+        let mut ret: Result<(), Error> = Ok(());
+        let mut offset = offset;
+        for chunk in buf.chunks(8) {
+            unsafe {
+                write_volatile(
+                    offset as *mut u32,
+                    u32::from_be_bytes(chunk[0..4].try_into().unwrap()),
+                );
+                write_volatile(
+                    (offset + 4) as *mut u32,
+                    u32::from_be_bytes(chunk[4..8].try_into().unwrap()),
+                );
+            }
+            offset += chunk.len() as u32;
+
+            ret = self.blocking_wait_ready();
+            if ret.is_err() {
+                break;
+            }
+        }
+
+        unsafe {
+            f.cr().write(|w| w.set_pg(false));
+        }
+
+        ret
+    }
+
+    pub fn blocking_erase(&mut self, from: u32, to: u32) -> Result<(), Error> {
+        if to < from || to as usize > FLASH_END {
+            return Err(Error::Size);
+        }
+        if from as usize % PAGE_SIZE != 0 || to as usize % PAGE_SIZE != 0 {
+            return Err(Error::Unaligned);
+        }
+
+        self.clear_all_err();
+
+        for page in (from..to).step_by(PAGE_SIZE) {
+            let f = pac::FLASH;
+            let idx = page / PAGE_SIZE as u32;
+            unsafe {
+                f.cr().modify(|w| {
+                    w.set_per(true);
+                    w.set_pnb(idx as u8);
+                    w.set_strt(true);
+                });
+            }
+
+            let ret: Result<(), Error> = self.blocking_wait_ready();
+
+            unsafe {
+                f.cr().modify(|w| w.set_per(false));
+            }
+
+            if ret.is_err() {
+                return ret;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn blocking_wait_ready(&self) -> Result<(), Error> {
+        loop {
+            let f = pac::FLASH;
+            let sr = unsafe { f.sr().read() };
+
+            if !sr.bsy() {
+                if sr.progerr() {
+                    return Err(Error::Prog);
+                }
+
+                if sr.wrperr() {
+                    return Err(Error::Protected);
+                }
+
+                if sr.pgaerr() {
+                    return Err(Error::Unaligned);
+                }
+
+                if sr.sizerr() {
+                    return Err(Error::Size);
+                }
+
+                if sr.miserr() {
+                    return Err(Error::Miss);
+                }
+
+                if sr.pgserr() {
+                    return Err(Error::Seq);
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    fn clear_all_err(&mut self) {
+        let f = pac::FLASH;
+        unsafe {
+            f.sr().write(|w| {
+                w.set_rderr(false);
+                w.set_fasterr(false);
+                w.set_miserr(false);
+                w.set_pgserr(false);
+                w.set_sizerr(false);
+                w.set_pgaerr(false);
+                w.set_wrperr(false);
+                w.set_progerr(false);
+                w.set_operr(false);
+                w.set_eop(false);
+            });
+        }
+    }
+}
+
+impl Drop for Flash<'_> {
+    fn drop(&mut self) {
+        let f = pac::FLASH;
+        unsafe {
+            f.cr().modify(|w| w.set_lock(false));
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error {
-    OutOfBounds,
+    Prog,
+    Size,
+    Miss,
+    Seq,
+    Protected,
     Unaligned,
 }
 
@@ -42,8 +216,9 @@ impl<'d> ErrorType for Flash<'d> {
 impl NorFlashError for Error {
     fn kind(&self) -> NorFlashErrorKind {
         match self {
-            Self::OutOfBounds => NorFlashErrorKind::OutOfBounds,
+            Self::Size => NorFlashErrorKind::OutOfBounds,
             Self::Unaligned => NorFlashErrorKind::NotAligned,
+            _ => NorFlashErrorKind::Other,
         }
     }
 }
@@ -52,7 +227,7 @@ impl<'d> ReadNorFlash for Flash<'d> {
     const READ_SIZE: usize = 1;
 
     fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
-        todo!()
+        self.blocking_read(offset, bytes)
     }
 
     fn capacity(&self) -> usize {
@@ -65,11 +240,11 @@ impl<'d> NorFlash for Flash<'d> {
     const ERASE_SIZE: usize = 2048; // TODO
 
     fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
-        todo!()
+        self.blocking_erase(from, to)
     }
 
     fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
-        todo!()
+        self.blocking_write(offset, bytes)
     }
 }
 
