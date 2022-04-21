@@ -17,8 +17,8 @@ mod fmt;
 use embedded_storage::nor_flash::{NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash};
 use embedded_storage_async::nor_flash::AsyncNorFlash;
 
-pub const BOOT_MAGIC: u32 = 0xD00DF00D;
-pub const SWAP_MAGIC: u32 = 0xF00FDAAD;
+pub const BOOT_MAGIC: u64 = 0xD00DF00DD00DF00D;
+pub const SWAP_MAGIC: u64 = 0xF00FDAADF00FDAAD;
 
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -100,7 +100,7 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
         // DFU partition must have an extra page
         assert!(dfu.len() - active.len() >= PAGE_SIZE);
         // Ensure we have enough progress pages to store copy progress
-        assert!(active.len() / PAGE_SIZE >= (state.len() - 4) / PAGE_SIZE);
+        assert!(active.len() / PAGE_SIZE >= (state.len() - 8) / PAGE_SIZE);
         Self { active, dfu, state }
     }
 
@@ -227,12 +227,12 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
     }
 
     fn current_progress<P: FlashConfig>(&mut self, p: &mut P) -> Result<usize, BootError> {
-        let max_index = ((self.state.len() - 4) / 4) - 1;
+        let max_index = ((self.state.len() - 8) / 8) - 1;
         let flash = p.flash();
         for i in 0..max_index {
-            let mut buf: [u8; 4] = [0; 4];
-            flash.read((self.state.from + 4 + i * 4) as u32, &mut buf)?;
-            if buf == [0xFF, 0xFF, 0xFF, 0xFF] {
+            let mut buf: [u8; 8] = [0; 8];
+            flash.read((self.state.from + 8 + i * 8) as u32, &mut buf)?;
+            if buf == [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] {
                 return Ok(i);
             }
         }
@@ -241,8 +241,8 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
 
     fn update_progress<P: FlashConfig>(&mut self, idx: usize, p: &mut P) -> Result<(), BootError> {
         let flash = p.flash();
-        let w = self.state.from + 4 + idx * 4;
-        flash.write(w as u32, &[0, 0, 0, 0])?;
+        let w = self.state.from + 8 + idx * 8;
+        flash.write(w as u32, &[0, 0, 0, 0, 0, 0, 0, 0])?;
         Ok(())
     }
 
@@ -350,11 +350,11 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
     }
 
     fn read_state<P: FlashConfig>(&mut self, p: &mut P) -> Result<State, BootError> {
-        let mut magic: [u8; 4] = [0; 4];
+        let mut magic: [u8; 8] = [0; 8];
         let flash = p.flash();
         flash.read(self.state.from as u32, &mut magic)?;
 
-        match u32::from_le_bytes(magic) {
+        match u64::from_le_bytes(magic) {
             SWAP_MAGIC => Ok(State::Swap),
             _ => Ok(State::Boot),
         }
@@ -436,16 +436,16 @@ impl FirmwareUpdater {
 
     /// Instruct bootloader that DFU should commence at next boot.
     pub async fn mark_update<F: AsyncNorFlash>(&mut self, flash: &mut F) -> Result<(), F::Error> {
-        #[repr(align(4))]
-        struct Aligned([u8; 4]);
+        #[repr(align(8))]
+        struct Aligned([u8; 8]);
 
-        let mut magic = Aligned([0; 4]);
+        let mut magic = Aligned([0; 8]);
         flash.read(self.state.from as u32, &mut magic.0).await?;
-        let magic = u32::from_le_bytes(magic.0);
+        let magic = u64::from_le_bytes(magic.0);
 
         if magic != SWAP_MAGIC {
             flash
-                .write(self.state.from as u32, &Aligned([0; 4]).0)
+                .write(self.state.from as u32, &Aligned([0; 8]).0)
                 .await?;
             flash
                 .erase(self.state.from as u32, self.state.to as u32)
@@ -465,16 +465,16 @@ impl FirmwareUpdater {
 
     /// Mark firmware boot successfully
     pub async fn mark_booted<F: AsyncNorFlash>(&mut self, flash: &mut F) -> Result<(), F::Error> {
-        #[repr(align(4))]
-        struct Aligned([u8; 4]);
+        #[repr(align(8))]
+        struct Aligned([u8; 8]);
 
-        let mut magic = Aligned([0; 4]);
+        let mut magic = Aligned([0; 8]);
         flash.read(self.state.from as u32, &mut magic.0).await?;
-        let magic = u32::from_le_bytes(magic.0);
+        let magic = u64::from_le_bytes(magic.0);
 
         if magic != BOOT_MAGIC {
             flash
-                .write(self.state.from as u32, &Aligned([0; 4]).0)
+                .write(self.state.from as u32, &Aligned([0; 8]).0)
                 .await?;
             flash
                 .erase(self.state.from as u32, self.state.to as u32)

@@ -22,7 +22,9 @@ fn main() -> ! {
     */
 
     let mut bl: BootLoader<2048> = BootLoader::default();
-    let start = bl.prepare(&mut SingleFlashProvider::new(&mut Flash::new(p.FLASH)));
+    let mut flash = Flash::unlock(p.FLASH);
+    let start = bl.prepare(&mut SingleFlashProvider::new(&mut flash));
+    core::mem::drop(flash);
     unsafe { bl.load(start) }
 }
 

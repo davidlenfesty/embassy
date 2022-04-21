@@ -24,14 +24,26 @@ pub struct Flash<'d> {
 impl<'d> Flash<'d> {
     pub fn new(p: impl Unborrow<Target = FLASH>) -> Self {
         unborrow!(p);
+        Self {
+            _inner: p,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn unlock(p: impl Unborrow<Target = FLASH>) -> Self {
+        let flash = Self::new(p);
         let f = pac::FLASH;
         unsafe {
             f.keyr().write(|w| w.set_keyr(0x4567_0123));
             f.keyr().write(|w| w.set_keyr(0xCDEF_89AB));
         }
-        Self {
-            _inner: p,
-            _phantom: PhantomData,
+        flash
+    }
+
+    pub fn lock(&mut self) {
+        let f = pac::FLASH;
+        unsafe {
+            f.cr().modify(|w| w.set_lock(false));
         }
     }
 
@@ -49,7 +61,7 @@ impl<'d> Flash<'d> {
         if offset as usize + buf.len() > FLASH_END {
             return Err(Error::Size);
         }
-        if offset as usize % 4 != 0 || buf.len() as usize % 4 != 0 {
+        if offset as usize % 8 != 0 || buf.len() as usize % 8 != 0 {
             return Err(Error::Unaligned);
         }
 
@@ -181,10 +193,7 @@ impl<'d> Flash<'d> {
 
 impl Drop for Flash<'_> {
     fn drop(&mut self) {
-        let f = pac::FLASH;
-        unsafe {
-            f.cr().modify(|w| w.set_lock(false));
-        }
+        self.lock();
     }
 }
 
@@ -226,7 +235,7 @@ impl<'d> ReadNorFlash for Flash<'d> {
 }
 
 impl<'d> NorFlash for Flash<'d> {
-    const WRITE_SIZE: usize = 4;
+    const WRITE_SIZE: usize = 8;
     const ERASE_SIZE: usize = 2048; // TODO
 
     fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
