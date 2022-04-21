@@ -12,7 +12,7 @@ defmt = { version = "0.3", optional = true }
 defmt-rtt = { version = "0.3", optional = true }
 
 embassy = { path = "../../embassy", default-features = false }
-embassy-stm32 = { path = "../../embassy-stm32", default-features = false, features = ["nightly", "memory-x"] }
+embassy-stm32 = { path = "../../embassy-stm32", default-features = false, features = ["nightly"] }
 embassy-boot = { path = "../boot", default-features = false }
 cortex-m = { version = "0.7" }
 cortex-m-rt = { version = "0.7" }

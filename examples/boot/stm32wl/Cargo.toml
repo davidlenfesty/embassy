@@ -1,0 +1,20 @@
+[package]
+authors = ["Ulf Lilleengen <lulf@redhat.com>"]
+edition = "2018"
+name = "embassy-boot-stm32wl-examples"
+version = "0.1.0"
+
+[dependencies]
+embassy = { version = "0.1.0", path = "../../../embassy", features = ["nightly"] }
+embassy-stm32 = { version = "0.1.0", path = "../../../embassy-stm32", features = ["nightly", "defmt", "stm32wl55jc-cm4", "time-driver-any", "exti"]  }
+embassy-boot-stm32 = { version = "0.1.0", path = "../../../embassy-boot/stm32" }
+embassy-traits = { version = "0.1.0", path = "../../../embassy-traits" }
+
+defmt = { version = "0.3" }
+defmt-rtt = { version = "0.3" }
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+panic-reset = { version = "0.1.1" }
+embedded-hal = { version = "0.2.6" }
+
+cortex-m = "0.7.3"
+cortex-m-rt = "0.7.0"
