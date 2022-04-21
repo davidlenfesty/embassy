@@ -67,12 +67,26 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
     }
 
     pub unsafe fn load(&mut self, start: usize) -> ! {
+        trace!("Loading app at 0x{:x}", start);
         let mut p = cortex_m::Peripherals::steal();
         p.SCB.invalidate_icache();
         p.SCB.vtor.write(start as u32);
-        cortex_m::asm::bootload(start as *const u32)
+        // cortex_m::asm::bootload(start as *const u32)
+        //
+
+        let sp = *(start as *const u32);
+        let rv = *((start + 4) as *const u32);
+
+        info!("SP: 0x{:x}", sp);
+        info!("RV: 0x{:x}", rv);
+        USER_RESET = Some(core::mem::transmute(rv));
+        cortex_m::register::msp::write(sp);
+        (USER_RESET.unwrap())();
+        loop {}
     }
 }
+
+static mut USER_RESET: Option<extern "C" fn()> = None;
 
 pub mod updater {
     use super::*;

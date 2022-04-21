@@ -8,13 +8,16 @@ use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::Peripherals;
 use panic_reset as _;
 
+#[cfg(feature = "defmt-rtt")]
 use defmt_rtt::*;
 
 #[embassy::main]
 async fn main(_spawner: Spawner, p: Peripherals) {
     let mut led = Output::new(p.PB15, Level::High, Speed::Low);
 
+    defmt::info!("HELLO, WORLD");
     loop {
+        defmt::info!("BLINK");
         led.set_high();
         Timer::after(Duration::from_millis(500)).await;
 

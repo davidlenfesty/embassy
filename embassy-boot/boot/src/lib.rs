@@ -203,6 +203,7 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
                 if !self.is_swapped(p.state())? {
                     trace!("Swapping");
                     self.swap(p)?;
+                    trace!("Swapping done");
                 } else {
                     trace!("Reverting");
                     self.revert(p)?;
@@ -314,20 +315,23 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
 
     fn swap<P: FlashProvider>(&mut self, p: &mut P) -> Result<(), BootError> {
         let page_count = self.active.len() / PAGE_SIZE;
-        // trace!("Page count: {}", page_count);
+        trace!("Page count: {}", page_count);
         for page in 0..page_count {
+            trace!("COPY PAGE {}", page);
             // Copy active page to the 'next' DFU page.
             let active_page = self.active_addr(page_count - 1 - page);
             let dfu_page = self.dfu_addr(page_count - page);
-            info!("Copy active {} to dfu {}", active_page, dfu_page);
+            //trace!("Copy active {} to dfu {}", active_page, dfu_page);
             self.copy_page_once_to_dfu(page * 2, active_page, dfu_page, p)?;
 
             // Copy DFU page to the active page
             let active_page = self.active_addr(page_count - 1 - page);
             let dfu_page = self.dfu_addr(page_count - 1 - page);
-            info!("Copy dfy {} to active {}", dfu_page, active_page);
+            //trace!("Copy dfy {} to active {}", dfu_page, active_page);
             self.copy_page_once_to_active(page * 2 + 1, dfu_page, active_page, p)?;
         }
+
+        info!("DONE COPYING");
 
         Ok(())
     }

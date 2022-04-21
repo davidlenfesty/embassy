@@ -11,6 +11,7 @@ use embassy_stm32::Peripherals;
 use embassy_traits::adapter::BlockingAsync;
 use panic_reset as _;
 
+#[cfg(feature = "defmt-rtt")]
 use defmt_rtt::*;
 
 static APP_B: &[u8] = include_bytes!("../../b.bin");
@@ -23,30 +24,27 @@ async fn main(_s: embassy::executor::Spawner, p: Peripherals) {
     let button = Input::new(p.PA0, Pull::Up);
     let mut button = ExtiInput::new(button, p.EXTI0);
 
+    defmt::info!("HELLO");
     let mut led = Output::new(p.PB9, Level::Low, Speed::Low);
 
-    defmt::info!("Waiting for updating");
+    let mut updater = updater::new();
     loop {
-        Timer::after(Duration::from_secs(5)).await;
-        defmt::info!("Writing firmware");
-        let mut updater = updater::new();
+        Timer::after(Duration::from_secs(5)).await; //button.wait_for_falling_edge().await;
         let mut offset = 0;
         for chunk in APP_B.chunks(2048) {
             let mut buf: [u8; 2048] = [0; 2048];
             buf[..chunk.len()].copy_from_slice(chunk);
+            defmt::info!("Writing chunk at 0x{:x}", offset);
             updater
                 .write_firmware(offset, &buf, &mut flash, 2048)
                 .await
                 .unwrap();
             offset += chunk.len();
         }
-        defmt::info!("Done writing firmware, marking update");
         updater.mark_update(&mut flash).await.unwrap();
-        defmt::info!("Done!");
+        defmt::info!("Marked as updated");
         led.set_high();
-        defmt::info!("Waiting for updating");
-        loop {
-            //    cortex_m::peripheral::SCB::sys_reset();
-        }
+        loop {}
+        // cortex_m::peripheral::SCB::sys_reset();
     }
 }
