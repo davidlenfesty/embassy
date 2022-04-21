@@ -24,27 +24,23 @@ async fn main(_s: embassy::executor::Spawner, p: Peripherals) {
     let button = Input::new(p.PA0, Pull::Up);
     let mut button = ExtiInput::new(button, p.EXTI0);
 
-    defmt::info!("HELLO");
     let mut led = Output::new(p.PB9, Level::Low, Speed::Low);
 
     let mut updater = updater::new();
-    loop {
-        Timer::after(Duration::from_secs(5)).await; //button.wait_for_falling_edge().await;
-        let mut offset = 0;
-        for chunk in APP_B.chunks(2048) {
-            let mut buf: [u8; 2048] = [0; 2048];
-            buf[..chunk.len()].copy_from_slice(chunk);
-            defmt::info!("Writing chunk at 0x{:x}", offset);
-            updater
-                .write_firmware(offset, &buf, &mut flash, 2048)
-                .await
-                .unwrap();
-            offset += chunk.len();
-        }
-        updater.mark_update(&mut flash).await.unwrap();
-        defmt::info!("Marked as updated");
-        led.set_high();
-        loop {}
-        // cortex_m::peripheral::SCB::sys_reset();
+    button.wait_for_falling_edge().await;
+    let mut offset = 0;
+    for chunk in APP_B.chunks(2048) {
+        let mut buf: [u8; 2048] = [0; 2048];
+        buf[..chunk.len()].copy_from_slice(chunk);
+        //        defmt::info!("Writing chunk at 0x{:x}", offset);
+        updater
+            .write_firmware(offset, &buf, &mut flash, 2048)
+            .await
+            .unwrap();
+        offset += chunk.len();
     }
+    updater.mark_update(&mut flash).await.unwrap();
+    //   defmt::info!("Marked as updated");
+    led.set_high();
+    cortex_m::peripheral::SCB::sys_reset();
 }

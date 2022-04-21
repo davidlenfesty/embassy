@@ -15,9 +15,7 @@ use defmt_rtt::*;
 async fn main(_spawner: Spawner, p: Peripherals) {
     let mut led = Output::new(p.PB15, Level::High, Speed::Low);
 
-    defmt::info!("HELLO, WORLD");
     loop {
-        defmt::info!("BLINK");
         led.set_high();
         Timer::after(Duration::from_millis(500)).await;
 
