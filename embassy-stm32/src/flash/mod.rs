@@ -2,7 +2,7 @@ use crate::pac;
 use crate::peripherals::FLASH;
 use core::convert::TryInto;
 use core::marker::PhantomData;
-use core::ptr::{read_volatile, write_volatile};
+use core::ptr::write_volatile;
 use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
 
@@ -11,7 +11,7 @@ use embedded_storage::nor_flash::{
 };
 
 const FLASH_SIZE: usize = 0x3FFFF;
-const FLASH_BASE: usize = 0x800000;
+const FLASH_BASE: usize = 0x8000000;
 const FLASH_START: usize = FLASH_BASE;
 const FLASH_END: usize = FLASH_START + FLASH_SIZE;
 const PAGE_SIZE: usize = 2048;
@@ -40,21 +40,8 @@ impl<'d> Flash<'d> {
             return Err(Error::Size);
         }
 
-        info!("Reading {} bytes from 0x{:x}", bytes.len(), offset);
-
-        let len = bytes.len();
-        let end = offset + bytes.len() as u32;
-        let mut remaining = bytes.len();
-        while offset < end {
-            let data = unsafe { read_volatile(offset as *const u64) };
-            let to_copy = core::cmp::min(8, remaining);
-
-            bytes[(len - remaining)..(len - remaining) + to_copy]
-                .copy_from_slice(&data.to_be_bytes()[..to_copy]);
-
-            remaining -= to_copy;
-            offset += to_copy as u32;
-        }
+        let flash_data = unsafe { core::slice::from_raw_parts(offset as *const u8, bytes.len()) };
+        bytes.copy_from_slice(flash_data);
         Ok(())
     }
 
@@ -79,11 +66,11 @@ impl<'d> Flash<'d> {
             unsafe {
                 write_volatile(
                     offset as *mut u32,
-                    u32::from_be_bytes(chunk[0..4].try_into().unwrap()),
+                    u32::from_le_bytes(chunk[0..4].try_into().unwrap()),
                 );
                 write_volatile(
                     (offset + 4) as *mut u32,
-                    u32::from_be_bytes(chunk[4..8].try_into().unwrap()),
+                    u32::from_le_bytes(chunk[4..8].try_into().unwrap()),
                 );
             }
             offset += chunk.len() as u32;

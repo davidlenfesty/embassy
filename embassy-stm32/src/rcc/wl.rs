@@ -20,7 +20,7 @@ pub enum ClockSrc {
     HSI16,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialOrd, PartialEq)]
 pub enum MSIRange {
     /// Around 100 kHz
     Range0,
@@ -63,6 +63,14 @@ impl MSIRange {
             MSIRange::Range9 => 24_000_000,
             MSIRange::Range10 => 32_000_000,
             MSIRange::Range11 => 48_000_000,
+        }
+    }
+
+    fn vos(&self) -> VoltageScale {
+        if self > &MSIRange::Range8 {
+            VoltageScale::Range1
+        } else {
+            VoltageScale::Range2
         }
     }
 }
@@ -191,13 +199,13 @@ impl Default for Config {
 }
 
 pub(crate) unsafe fn init(config: Config) {
-    let (sys_clk, sw) = match config.mux {
+    let (sys_clk, sw, vos) = match config.mux {
         ClockSrc::HSI16 => {
             // Enable HSI16
             RCC.cr().write(|w| w.set_hsion(true));
             while !RCC.cr().read().hsirdy() {}
 
-            (HSI_FREQ, 0x01)
+            (HSI_FREQ, 0x01, VoltageScale::Range2)
         }
         ClockSrc::HSE32 => {
             // Enable HSE32
@@ -207,7 +215,7 @@ pub(crate) unsafe fn init(config: Config) {
             });
             while !RCC.cr().read().hserdy() {}
 
-            (HSE32_FREQ, 0x02)
+            (HSE32_FREQ, 0x02, VoltageScale::Range1)
         }
         ClockSrc::MSI(range) => {
             RCC.cr().write(|w| {
@@ -217,7 +225,7 @@ pub(crate) unsafe fn init(config: Config) {
 
             while !RCC.cr().read().msirdy() {}
 
-            (range.freq(), 0x00)
+            (range.freq(), 0x00, range.vos())
         }
     };
 
@@ -290,9 +298,6 @@ pub(crate) unsafe fn init(config: Config) {
 
     if config.enable_flash {
         let flash_clk_src_freq: u32 = shd_ahb_freq;
-
-        let vos = VoltageScale::Range1;
-
         let ws = match vos {
             VoltageScale::Range1 => match flash_clk_src_freq {
                 0..=18_000_000 => 0b000,
@@ -312,9 +317,10 @@ pub(crate) unsafe fn init(config: Config) {
 
         while FLASH.acr().read().latency() != ws {}
 
-        info!("ENABLING FLASH");
+        /*
         RCC.ahb3enr().modify(|w| w.set_flashen(true));
         RCC.ahb3rstr().modify(|w| w.set_flashrst(false));
+        */
     }
 
     set_freqs(Clocks {

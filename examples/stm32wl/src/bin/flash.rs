@@ -26,14 +26,12 @@ async fn main(_spawner: Spawner, p: Peripherals) {
     // probe-run breaks without this, I'm not sure why.
     Timer::after(Duration::from_secs(1)).await;
 
-    const ADDR: u32 = 0x083F000;
-
-    //defmt::assert_eq!(unsafe { read_volatile(ADDR as *const u64) }, u64::MAX);
+    const ADDR: u32 = 0x8036000;
 
     let mut f = Flash::new(p.FLASH);
 
     info!("Reading...");
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 8];
     unwrap!(f.read(ADDR, &mut buf));
     info!("Read: {=[u8]:x}", buf);
 
@@ -41,15 +39,16 @@ async fn main(_spawner: Spawner, p: Peripherals) {
     unwrap!(f.erase(ADDR, ADDR + 2048));
 
     info!("Reading...");
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 8];
     unwrap!(f.read(ADDR, &mut buf));
     info!("Read: {=[u8]:x}", buf);
 
     info!("Writing...");
-    unwrap!(f.write(ADDR, &[1, 2, 3, 4]));
+    unwrap!(f.write(ADDR, &[1, 2, 3, 4, 5, 6, 7, 8]));
 
     info!("Reading...");
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 8];
     unwrap!(f.read(ADDR, &mut buf));
     info!("Read: {=[u8]:x}", buf);
+    assert_eq!(&buf[..], &[1, 2, 3, 4, 5, 6, 7, 8]);
 }
