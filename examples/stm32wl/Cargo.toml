@@ -23,7 +23,3 @@ embedded-storage = "0.3.0"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.5", default-features = false }
-
-[patch."https://github.com/ivajloip/rust-lorawan.git"]
-lorawan-device = { path = "../../../rust-lorawan/device" }
-lorawan-encoding = { path = "../../../rust-lorawan/encoding" }
