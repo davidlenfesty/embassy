@@ -1,8 +1,5 @@
-use core::convert::TryFrom;
-
 use super::{set_freqs, Clocks};
 use crate::pac::flash::vals::Latency;
-use crate::pac::gpio::vals::{CnfOut, Mode};
 use crate::pac::rcc::vals::{
     Adcpre, Hpre, Mco, Pll2mul, Pllmul, Pllsrc, Ppre1, Prediv1, Prediv1src, Sw, Usbpre,
 };
@@ -406,7 +403,7 @@ pub(crate) unsafe fn init(config: Config) {
     // for now just use this bodge
 
     // Enable HSE if selected
-    if let Some(hse) = config.hse {
+    if config.hse.is_some() {
         RCC.cr().modify(|w| w.set_hseon(true));
         while !RCC.cr().read().hsirdy() {}
     }
@@ -462,7 +459,7 @@ pub(crate) unsafe fn init(config: Config) {
     // Configure PLL and start PLL
     let pllclk = config.pllmul.map(|pllmul| {
         let in_freq = match config.pllsrc.unwrap() {
-            PllSrc::HsiDiv2 => Hertz(4_000_000), // 8MHz / 2
+            PllSrc::HsiDiv2 => Hertz(HSI / 2),
             PllSrc::Prediv1 => prediv1clk.unwrap(),
         };
 
@@ -479,8 +476,8 @@ pub(crate) unsafe fn init(config: Config) {
     // Get SYSCLK frequency
     let sysclk = config
         .sysclk_src
-        .map_or(Hertz(8_000_000), |sysclk_src| match sysclk_src {
-            SysclockSrc::Hsi => Hertz(8_000_000),
+        .map_or(Hertz(HSI), |sysclk_src| match sysclk_src {
+            SysclockSrc::Hsi => Hertz(HSI),
             SysclockSrc::Hse => config.hse.unwrap(),
             SysclockSrc::Pll => pllclk.unwrap(),
         });
@@ -551,7 +548,7 @@ pub(crate) unsafe fn init(config: Config) {
         match mco_src {
             McoSrc::NoClk => Hertz(0),
             McoSrc::Hse => config.hse.unwrap(),
-            McoSrc::Hsi => Hertz(8_000_000),
+            McoSrc::Hsi => Hertz(HSI),
             McoSrc::Sysclk => sysclk,
             McoSrc::PllClkDiv2 => Hertz(pllclk.unwrap().0 / 2),
             #[cfg(rcc_f1cl)]
