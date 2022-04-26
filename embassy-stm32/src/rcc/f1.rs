@@ -224,13 +224,18 @@ impl Into<Sw> for SysclockSrc {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum McoSrc {
+    NoClk,
     Hse,
     Hsi,
     Sysclk,
     PllClkDiv2,
+    #[cfg(rcc_f1cl)]
     Pll2Clk,
+    #[cfg(rcc_f1cl)]
     Pll3ClkDiv2,
+    #[cfg(rcc_f1cl)]
     Pll3Clk,
+    #[cfg(rcc_f1cl)]
     Xt1,
 }
 
@@ -238,11 +243,19 @@ impl Into<Mco> for McoSrc {
     fn into(self) -> Mco {
         // TODO map properly
         match self {
+            McoSrc::NoClk => Mco::NOMCO,
             McoSrc::Hse => Mco::HSE,
             McoSrc::Hsi => Mco::HSI,
             McoSrc::Sysclk => Mco::SYSCLK,
             McoSrc::PllClkDiv2 => Mco::PLL,
-            _ => Mco::NOMCO,
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll2Clk => Mco::PLL2,
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll3ClkDiv2 => Mco::PLL3DIV2,
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll3Clk => Mco::PLL3,
+            #[cfg(rcc_f1cl)]
+            McoSrc::Xt1 => Mco::XT1,
         }
     }
 }
@@ -331,6 +344,39 @@ impl Into<Ppre1> for APBPrescaler {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum AdcPrescaler {
+    Div2,
+    Div4,
+    Div6,
+    Div8,
+}
+
+impl Div<AdcPrescaler> for Hertz {
+    type Output = Hertz;
+
+    fn div(self, rhs: AdcPrescaler) -> Self::Output {
+        let divisor = match rhs {
+            AdcPrescaler::Div2 => 2,
+            AdcPrescaler::Div4 => 4,
+            AdcPrescaler::Div6 => 6,
+            AdcPrescaler::Div8 => 8,
+        };
+        Hertz(self.0 / divisor)
+    }
+}
+
+impl Into<Adcpre> for AdcPrescaler {
+    fn into(self) -> Adcpre {
+        match self {
+            AdcPrescaler::Div2 => Adcpre::DIV2,
+            AdcPrescaler::Div4 => Adcpre::DIV4,
+            AdcPrescaler::Div6 => Adcpre::DIV6,
+            AdcPrescaler::Div8 => Adcpre::DIV8,
+        }
+    }
+}
+
 /// Configuration of the clocks
 ///
 #[non_exhaustive]
@@ -352,6 +398,7 @@ pub struct Config {
     pub hpre: Option<AHBPrescaler>,
     pub ppre1: Option<APBPrescaler>,
     pub ppre2: Option<APBPrescaler>,
+    pub adcpre: Option<AdcPrescaler>,
 }
 
 pub(crate) unsafe fn init(config: Config) {
@@ -471,7 +518,7 @@ pub(crate) unsafe fn init(config: Config) {
         None => (ahbclk, ahbclk),
     };
 
-    let apb2clk = match config.ppre2 {
+    let (apb2clk, apb2clk_tim) = match config.ppre2 {
         Some(ppre2) => {
             RCC.cfgr().modify(|w| w.set_ppre2(ppre2.into()));
             let apb2clk = ahbclk / ppre2;
@@ -484,27 +531,38 @@ pub(crate) unsafe fn init(config: Config) {
         None => (ahbclk, ahbclk),
     };
 
+    let adcclk = match config.adcpre {
+        Some(adcpre) => {
+            RCC.cfgr().modify(|w| w.set_adcpre(adcpre.into()));
+            apb2clk / adcpre
+        }
+        None => Hertz(apb2clk.0 / 2),
+    };
+
     // Check final clock frequencies
     assert!(sysclk <= Hertz(72_000_000));
     assert!(apb1clk <= Hertz(36_000_000));
+    assert!(apb2clk <= Hertz(72_000_000));
+    assert!(adcclk <= Hertz(14_000_000));
 
     // Select MCO input
-    let mco = config.mco_src.map_or(sysclk, |mco_src| match mco_src {
-        // TODO proper type mappings and make everything work
-        McoSrc::Hse => {
-            RCC.cfgr().modify(|w| w.set_mco(Mco(0x06)));
-            config.hse.unwrap()
+    let mco = config.mco_src.map(|mco_src| {
+        RCC.cfgr().modify(|w| w.set_mco(mco_src.into()));
+        match mco_src {
+            McoSrc::NoClk => Hertz(0),
+            McoSrc::Hse => config.hse.unwrap(),
+            McoSrc::Hsi => Hertz(8_000_000),
+            McoSrc::Sysclk => sysclk,
+            McoSrc::PllClkDiv2 => Hertz(pllclk.unwrap().0 / 2),
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll2Clk => pll2clk.unwrap(),
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll3ClkDiv2 => Hertz(pll3clk.unwrap().0 / 2),
+            #[cfg(rcc_f1cl)]
+            McoSrc::Pll3Clk => pll3clk.unwrap(),
+            #[cfg(rcc_f1cl)]
+            McoSrc::Xt1 => config.hse.unwrap(),
         }
-        McoSrc::Xt1 => {
-            RCC.cfgr().modify(|w| w.set_mco(Mco(0b1010)));
-            config.hse.unwrap()
-        }
-        McoSrc::Hsi => Hertz(8_000_000),
-        McoSrc::Sysclk => sysclk,
-        McoSrc::PllClkDiv2 => Hertz(pllclk.unwrap().0 / 2),
-        McoSrc::Pll2Clk => pll2clk.unwrap(),
-        McoSrc::Pll3ClkDiv2 => Hertz(pll3clk.unwrap().0 / 2),
-        McoSrc::Pll3Clk => pll3clk.unwrap(),
     });
 
     // Finally switch over system clock
@@ -513,15 +571,15 @@ pub(crate) unsafe fn init(config: Config) {
     }
 
     // TODO set these properly
-    // TODO adcclk
     // TODO other clocks too
     set_freqs(Clocks {
-        sys: Hertz(72_000_000),
-        apb1: Hertz(36_000_000),
-        apb2: Hertz(36_000_000),
-        apb1_tim: Hertz(72_000_000),
-        apb2_tim: Hertz(72_000_000),
-        ahb1: Hertz(72_000_000),
-        adc: Hertz(36_000_000), // TODO not necessarily correct, need to check if doing ADC stuff
+        sys: sysclk,
+        apb1: apb1clk,
+        apb2: apb2clk,
+        apb1_tim: apb1clk_tim,
+        apb2_tim: apb2clk_tim,
+        ahb1: ahbclk,
+        adc: adcclk,
+        mco: mco,
     });
 }
