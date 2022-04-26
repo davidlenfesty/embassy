@@ -229,7 +229,7 @@ pub enum McoSrc {
     Sysclk,
     PllClkDiv2,
     Pll2Clk,
-    Pll3ClkDiv3,
+    Pll3ClkDiv2,
     Pll3Clk,
     Xt1,
 }
@@ -503,7 +503,7 @@ pub(crate) unsafe fn init(config: Config) {
         McoSrc::Sysclk => sysclk,
         McoSrc::PllClkDiv2 => Hertz(pllclk.unwrap().0 / 2),
         McoSrc::Pll2Clk => pll2clk.unwrap(),
-        McoSrc::Pll3ClkDiv3 => Hertz(pll3clk.unwrap().0 / 3),
+        McoSrc::Pll3ClkDiv2 => Hertz(pll3clk.unwrap().0 / 2),
         McoSrc::Pll3Clk => pll3clk.unwrap(),
     });
 
