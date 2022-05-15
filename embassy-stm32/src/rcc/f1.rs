@@ -118,7 +118,7 @@ impl Into<Pllmul> for PllMul {
             PllMul::Mul8 => Pllmul::MUL8,
             PllMul::Mul9 => Pllmul::MUL9,
             // TODO fix clocks up properly to avoid this hackiness
-            PllMul::Mul6_5 => Pllmul::MUL15,
+            PllMul::Mul6_5 => Pllmul::MUL6_5,
         }
     }
 }

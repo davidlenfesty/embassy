@@ -4,7 +4,6 @@ use smoltcp::phy::DeviceCapabilities;
 use smoltcp::time::Instant as SmolInstant;
 
 use crate::packet_pool::PacketBoxExt;
-use crate::Result;
 use crate::{Packet, PacketBox, PacketBuf};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -21,7 +20,7 @@ pub trait Device {
     fn register_waker(&mut self, waker: &Waker);
     fn capabilities(&mut self) -> DeviceCapabilities;
     fn link_state(&mut self) -> LinkState;
-    fn ethernet_address(&mut self) -> [u8; 6];
+    fn ethernet_address(&self) -> [u8; 6];
 }
 
 pub struct DeviceAdapter {
@@ -78,9 +77,9 @@ pub struct RxToken {
 }
 
 impl smoltcp::phy::RxToken for RxToken {
-    fn consume<R, F>(mut self, _timestamp: SmolInstant, f: F) -> Result<R>
+    fn consume<R, F>(mut self, _timestamp: SmolInstant, f: F) -> smoltcp::Result<R>
     where
-        F: FnOnce(&mut [u8]) -> Result<R>,
+        F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
     {
         f(&mut self.pkt)
     }
@@ -92,9 +91,9 @@ pub struct TxToken<'a> {
 }
 
 impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
-    fn consume<R, F>(self, _timestamp: SmolInstant, len: usize, f: F) -> Result<R>
+    fn consume<R, F>(self, _timestamp: SmolInstant, len: usize, f: F) -> smoltcp::Result<R>
     where
-        F: FnOnce(&mut [u8]) -> Result<R>,
+        F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
     {
         let mut buf = self.pkt.slice(0..len);
         let r = f(&mut buf)?;

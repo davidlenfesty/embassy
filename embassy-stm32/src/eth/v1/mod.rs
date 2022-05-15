@@ -117,9 +117,9 @@ impl<'d, T: Instance, P: PHY, const TX: usize, const RX: usize> Ethernet<'d, T, 
             AFIO.mapr().modify(|w| w.set_mii_rmii_sel(true));
 
             RCC.ahbenr().modify(|w| {
-                w.set_ethmacen(true);
-                w.set_ethmactxen(true);
-                w.set_ethmacrxen(true);
+                w.set_ethen(true);
+                w.set_ethtxen(true);
+                w.set_ethrxen(true);
             });
         });
 
@@ -334,7 +334,7 @@ impl<'d, T: Instance, P: PHY, const TX: usize, const RX: usize> Device
         }
     }
 
-    fn ethernet_address(&mut self) -> [u8; 6] {
+    fn ethernet_address(&self) -> [u8; 6] {
         self.mac_addr
     }
 }

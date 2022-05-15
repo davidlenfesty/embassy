@@ -9,7 +9,6 @@ use embassy::interrupt::InterruptExt;
 use embassy::util::Unborrow;
 use embassy::waitqueue::AtomicWaker;
 use embassy_hal_common::unborrow;
-use embassy_usb::control::Request;
 use embassy_usb::driver::{self, EndpointError, Event, Unsupported};
 use embassy_usb::types::{EndpointAddress, EndpointInfo, EndpointType, UsbDirection};
 use futures::future::poll_fn;
@@ -143,58 +142,46 @@ impl<'d, T: Instance> driver::Driver<'d> for Driver<'d, T> {
 
     fn alloc_endpoint_in(
         &mut self,
-        ep_addr: Option<EndpointAddress>,
         ep_type: EndpointType,
-        max_packet_size: u16,
+        packet_size: u16,
         interval: u8,
     ) -> Result<Self::EndpointIn, driver::EndpointAllocError> {
-        let index = self
-            .alloc_in
-            .allocate(ep_addr, ep_type, max_packet_size, interval)?;
+        let index = self.alloc_in.allocate(ep_type)?;
         let ep_addr = EndpointAddress::from_parts(index, UsbDirection::In);
         Ok(Endpoint::new(EndpointInfo {
             addr: ep_addr,
             ep_type,
-            max_packet_size,
+            max_packet_size: packet_size,
             interval,
         }))
     }
 
     fn alloc_endpoint_out(
         &mut self,
-        ep_addr: Option<EndpointAddress>,
         ep_type: EndpointType,
-        max_packet_size: u16,
+        packet_size: u16,
         interval: u8,
     ) -> Result<Self::EndpointOut, driver::EndpointAllocError> {
-        let index = self
-            .alloc_out
-            .allocate(ep_addr, ep_type, max_packet_size, interval)?;
+        let index = self.alloc_out.allocate(ep_type)?;
         let ep_addr = EndpointAddress::from_parts(index, UsbDirection::Out);
         Ok(Endpoint::new(EndpointInfo {
             addr: ep_addr,
             ep_type,
-            max_packet_size,
+            max_packet_size: packet_size,
             interval,
         }))
     }
 
-    fn alloc_control_pipe(
-        &mut self,
-        max_packet_size: u16,
-    ) -> Result<Self::ControlPipe, driver::EndpointAllocError> {
-        self.alloc_endpoint_out(Some(0x00.into()), EndpointType::Control, max_packet_size, 0)?;
-        self.alloc_endpoint_in(Some(0x80.into()), EndpointType::Control, max_packet_size, 0)?;
-        Ok(ControlPipe {
-            _phantom: PhantomData,
-            max_packet_size,
-        })
-    }
-
-    fn into_bus(self) -> Self::Bus {
-        Bus {
-            phantom: PhantomData,
-        }
+    fn start(self, control_max_packet_size: u16) -> (Self::Bus, Self::ControlPipe) {
+        (
+            Bus {
+                phantom: PhantomData,
+            },
+            ControlPipe {
+                _phantom: PhantomData,
+                max_packet_size: control_max_packet_size,
+            },
+        )
     }
 }
 
@@ -538,10 +525,6 @@ unsafe fn read_dma<T: Instance>(i: usize, buf: &mut [u8]) -> Result<usize, Endpo
         return Err(EndpointError::BufferOverflow);
     }
 
-    if i == 0 {
-        regs.events_ep0datadone.reset();
-    }
-
     let epout = [
         &regs.epout0,
         &regs.epout1,
@@ -652,7 +635,7 @@ pub struct ControlPipe<'d, T: Instance> {
 }
 
 impl<'d, T: Instance> driver::ControlPipe for ControlPipe<'d, T> {
-    type SetupFuture<'a> = impl Future<Output = Request> + 'a where Self: 'a;
+    type SetupFuture<'a> = impl Future<Output = [u8;8]> + 'a where Self: 'a;
     type DataOutFuture<'a> = impl Future<Output = Result<usize, EndpointError>> + 'a where Self: 'a;
     type DataInFuture<'a> = impl Future<Output = Result<(), EndpointError>> + 'a where Self: 'a;
 
@@ -664,11 +647,11 @@ impl<'d, T: Instance> driver::ControlPipe for ControlPipe<'d, T> {
         async move {
             let regs = T::regs();
 
+            // Reset shorts
+            regs.shorts.write(|w| w);
+
             // Wait for SETUP packet
-            regs.intenset.write(|w| {
-                w.ep0setup().set();
-                w.ep0datadone().set()
-            });
+            regs.intenset.write(|w| w.ep0setup().set());
             poll_fn(|cx| {
                 EP0_WAKER.register(cx.waker());
                 let regs = T::regs();
@@ -680,9 +663,6 @@ impl<'d, T: Instance> driver::ControlPipe for ControlPipe<'d, T> {
             })
             .await;
 
-            // Reset shorts
-            regs.shorts
-                .modify(|_, w| w.ep0datadone_ep0status().clear_bit());
             regs.events_ep0setup.reset();
 
             let mut buf = [0; 8];
@@ -695,20 +675,19 @@ impl<'d, T: Instance> driver::ControlPipe for ControlPipe<'d, T> {
             buf[6] = regs.wlengthl.read().wlengthl().bits();
             buf[7] = regs.wlengthh.read().wlengthh().bits();
 
-            let req = Request::parse(&buf);
-
-            if req.direction == UsbDirection::Out {
-                regs.tasks_ep0rcvout
-                    .write(|w| w.tasks_ep0rcvout().set_bit());
-            }
-
-            req
+            buf
         }
     }
 
     fn data_out<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::DataOutFuture<'a> {
         async move {
             let regs = T::regs();
+
+            regs.events_ep0datadone.reset();
+
+            // This starts a RX on EP0. events_ep0datadone notifies when done.
+            regs.tasks_ep0rcvout
+                .write(|w| w.tasks_ep0rcvout().set_bit());
 
             // Wait until ready
             regs.intenset.write(|w| {
@@ -741,12 +720,12 @@ impl<'d, T: Instance> driver::ControlPipe for ControlPipe<'d, T> {
         async move {
             let regs = T::regs();
             regs.events_ep0datadone.reset();
-            unsafe {
-                write_dma::<T>(0, buf);
-            }
 
             regs.shorts
-                .modify(|_, w| w.ep0datadone_ep0status().bit(last_packet));
+                .write(|w| w.ep0datadone_ep0status().bit(last_packet));
+
+            // This starts a TX on EP0. events_ep0datadone notifies when done.
+            unsafe { write_dma::<T>(0, buf) }
 
             regs.intenset.write(|w| {
                 w.usbreset().set();
@@ -796,25 +775,14 @@ fn dma_end() {
 
 struct Allocator {
     used: u16,
-    // Buffers can be up to 64 Bytes since this is a Full-Speed implementation.
-    lens: [u8; 9],
 }
 
 impl Allocator {
     fn new() -> Self {
-        Self {
-            used: 0,
-            lens: [0; 9],
-        }
+        Self { used: 0 }
     }
 
-    fn allocate(
-        &mut self,
-        ep_addr: Option<EndpointAddress>,
-        ep_type: EndpointType,
-        max_packet_size: u16,
-        _interval: u8,
-    ) -> Result<usize, driver::EndpointAllocError> {
+    fn allocate(&mut self, ep_type: EndpointType) -> Result<usize, driver::EndpointAllocError> {
         // Endpoint addresses are fixed in hardware:
         // - 0x80 / 0x00 - Control        EP0
         // - 0x81 / 0x01 - Bulk/Interrupt EP1
@@ -828,27 +796,16 @@ impl Allocator {
 
         // Endpoint directions are allocated individually.
 
-        let alloc_index = if let Some(ep_addr) = ep_addr {
-            match (ep_addr.index(), ep_type) {
-                (0, EndpointType::Control) => {}
-                (8, EndpointType::Isochronous) => {}
-                (n, EndpointType::Bulk) | (n, EndpointType::Interrupt) if n >= 1 && n <= 7 => {}
-                _ => return Err(driver::EndpointAllocError),
-            }
-
-            ep_addr.index()
-        } else {
-            match ep_type {
-                EndpointType::Isochronous => 8,
-                EndpointType::Control => 0,
-                EndpointType::Interrupt | EndpointType::Bulk => {
-                    // Find rightmost zero bit in 1..=7
-                    let ones = (self.used >> 1).trailing_ones() as usize;
-                    if ones >= 7 {
-                        return Err(driver::EndpointAllocError);
-                    }
-                    ones + 1
+        let alloc_index = match ep_type {
+            EndpointType::Isochronous => 8,
+            EndpointType::Control => return Err(driver::EndpointAllocError),
+            EndpointType::Interrupt | EndpointType::Bulk => {
+                // Find rightmost zero bit in 1..=7
+                let ones = (self.used >> 1).trailing_ones() as usize;
+                if ones >= 7 {
+                    return Err(driver::EndpointAllocError);
                 }
+                ones + 1
             }
         };
 
@@ -857,7 +814,6 @@ impl Allocator {
         }
 
         self.used |= 1 << alloc_index;
-        self.lens[alloc_index] = max_packet_size as u8;
 
         Ok(alloc_index)
     }
